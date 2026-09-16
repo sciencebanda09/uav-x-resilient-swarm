@@ -1,0 +1,22 @@
+# Private reference project — never publish with UAV-X
+aegis-x/
+
+# Local state and generated artifacts
+logs/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.jsonl
+*.png
+*.mp4
+*.mat
+
+# Local challenge material
+UAV-X__Resilient_BVLOS_Swarm_Challenge_1_compressed.pdf
+
+# Virtual environments and build output
+.venv/
+venv/
+dist/
+build/
+*.egg-info/

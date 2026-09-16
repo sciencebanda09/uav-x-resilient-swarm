@@ -1,0 +1,2 @@
+# Standalone public CCPL policy dependency for UAV-X.
+ccpl-rl @ git+https://github.com/sciencebanda09/CCPL.git
