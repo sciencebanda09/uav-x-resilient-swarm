@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
@@ -33,8 +34,19 @@ def validate_record(record: dict[str, Any]) -> None:
         raise ValueError(f"unsupported schema {record['schema_version']!r}")
     if record["record_type"] not in {"manifest", "tick", "event", "summary"}:
         raise ValueError(f"invalid record_type {record['record_type']!r}")
+    if record["record_type"] == "tick":
+        required_tick = {"uavs", "pois", "links", "packets", "route_redundancy"}
+        missing_tick = required_tick - record.keys()
+        if missing_tick:
+            raise ValueError(f"missing tick fields: {sorted(missing_tick)}")
+    if record["record_type"] == "event":
+        required_event = {"event_type", "actor_id", "related_id", "details", "cause"}
+        missing_event = required_event - record.keys()
+        if missing_event:
+            raise ValueError(f"missing event fields: {sorted(missing_event)}")
 
 def write_jsonl(path: str, records: Iterable[LogEnvelope | dict[str, Any]]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         for item in records:
             record = item.to_dict() if isinstance(item, LogEnvelope) else item
