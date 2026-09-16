@@ -1,0 +1,23 @@
+{
+  "scene_id": "demo_photogrammetry_disaster_zone",
+  "version": "1.0",
+  "coordinate_frame": "ENU",
+  "origin_m": [0.0, 0.0, 0.0],
+  "arena_m": 500,
+  "terrain": {
+    "mode": "fallback_procedural",
+    "photogrammetry_url": "assets/photogrammetry/terrain.glb",
+    "low_res_url": "assets/fallback/terrain.glb",
+    "lod_levels": ["low", "medium", "high"]
+  },
+  "drone_model": {
+    "gltf_url": "assets/drone.glb",
+    "fallback": "procedural_quadrotor"
+  },
+  "obstacles": {
+    "metadata_url": "assets/obstacles.json",
+    "collision_proxy_url": "assets/collision_proxy.glb"
+  },
+  "recharge_pads": [[40, 40, 5]],
+  "geofence": [[2, 2], [498, 2], [498, 498], [2, 498]]
+}

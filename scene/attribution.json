@@ -1,0 +1,9 @@
+{
+  "scene_id": "wayanad_kerala_real",
+  "location": "Wayanad, Kerala, India",
+  "sources": [
+    {"name":"NASA/USGS SRTM","purpose":"elevation","url":"https://data.nasa.gov/dataset/shuttle-radar-topography-mission-1-arc-second-global"},
+    {"name":"Copernicus Sentinel-2","purpose":"optional satellite texture","url":"https://www.copernicus.eu/en/terms-use/how-access-data"},
+    {"name":"OpenStreetMap contributors","purpose":"roads/buildings/water","license":"ODbL","url":"https://www.openstreetmap.org/copyright"}
+  ]
+}

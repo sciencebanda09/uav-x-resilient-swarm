@@ -1,0 +1,9 @@
+{
+  "scene_id": "demo_photogrammetry_disaster_zone",
+  "obstacles": [
+    {"id": "building-01", "kind": "building", "center_m": [210, 260, 18], "size_m": [60, 48, 36], "radio_occluder": true},
+    {"id": "tower-01", "kind": "tower", "center_m": [350, 180, 35], "size_m": [8, 8, 70], "radio_occluder": true},
+    {"id": "bridge-01", "kind": "bridge", "center_m": [320, 350, 10], "size_m": [90, 18, 12], "radio_occluder": false},
+    {"id": "rubble-01", "kind": "rubble", "center_m": [120, 390, 8], "size_m": [55, 40, 16], "radio_occluder": false}
+  ]
+}
