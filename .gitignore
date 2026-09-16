@@ -3,6 +3,12 @@ aegis-x/
 
 # Local state and generated artifacts
 logs/
+runs/
+artifacts/
+checkpoints/
+reports/
+viewer/node_modules/
+viewer/dist/
 .pytest_cache/
 __pycache__/
 *.py[cod]
@@ -10,9 +16,15 @@ __pycache__/
 *.png
 *.mp4
 *.mat
+*.pkl
+policy_comparison.json
 
 # Local challenge material
 UAV-X__Resilient_BVLOS_Swarm_Challenge_1_compressed.pdf
+
+# Downloaded raw scene inputs; only optimized derivatives are publishable
+scene/raw/
+scene/generated/
 
 # Virtual environments and build output
 .venv/
