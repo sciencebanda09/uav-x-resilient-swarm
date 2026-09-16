@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>UAV-X Realistic Mission Viewer</title></head>
+<body><div id="app"><header><strong>UAV-X</strong><span>RESILIENT BVLOS SWARM</span><label>Replay JSON <input id="file" type="file" accept=".json,.jsonl"></label><button id="play">▶ Play</button><input id="seek" type="range" min="0" max="0" value="0"></header><aside id="telemetry">Load a replay JSON to begin.</aside><section id="legend"><b>MISSION LEGEND</b><span>🟢 Survey</span><span>🔵 Relay</span><span>🔴 Return</span><span>🟠 Pending PoI</span><span>━━ radio link</span></section><div id="event-banner"></div><main id="viewport"></main></div><script type="module" src="/src/main.js"></script></body>
+</html>

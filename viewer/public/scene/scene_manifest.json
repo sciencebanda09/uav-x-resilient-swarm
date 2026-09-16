@@ -1,0 +1,20 @@
+{
+  "scene_id": "wayanad_kerala_real",
+  "asset_mode": "real",
+  "coordinate_frame": "ENU",
+  "arena_m": 500,
+  "terrain": {
+    "gltf_url": "/scene/terrain.glb",
+    "albedo_url": "/scene/sentinel_preview.jpg",
+    "source": "NASA SRTM N11E076 + Copernicus Sentinel-2 preview",
+    "resolution_m": 4.85
+  },
+  "obstacles": {
+    "metadata_url": "/scene/obstacles.json"
+  },
+  "attribution": [
+    "NASA/USGS SRTM",
+    "OpenStreetMap contributors",
+    "Copernicus Sentinel-2"
+  ]
+}
