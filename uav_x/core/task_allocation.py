@@ -1,14 +1,18 @@
 """Deterministic decentralized-style heuristic controller."""
 from __future__ import annotations
 import numpy as np
-from .models import GCS, PoI, ScenarioConfig, UAV, clamp_move
+from .models import GCS, PoI, ScenarioConfig, UAV, advance_dynamics, safe_destination
 from .connectivity import ConnectivityGraph
 from .ccpl_adapter import CCPLPolicy
+from .obstacles import ObstacleField
+from .environment import TerrainModel
 
 class HeuristicController:
     def __init__(self, cfg: ScenarioConfig, policy: str = "auto",
-                 checkpoint: str | None = None):
+                 checkpoint: str | None = None, obstacles: ObstacleField | None = None, terrain: TerrainModel | None = None):
         self.cfg = cfg
+        self.obstacles = obstacles
+        self.terrain = terrain
         self.cooldown: dict[str, int] = {}
         if policy not in {"auto", "heuristic", "ccpl"}:
             raise ValueError("policy must be auto, heuristic, or ccpl")
@@ -49,7 +53,9 @@ class HeuristicController:
             scored = [(self._score(u, p, gcs, graph), p) for p in candidates]
             scored = [(s, p) for s, p in scored if s > 0]
             if scored:
-                _, poi = max(scored, key=lambda pair: (pair[0], -int(pair[1].pid.split("-")[-1])))
+                # IDs may be numeric (POI-03) or semantic (POI-EMERGENCY).
+                # Use the full stable string as a deterministic tie-breaker.
+                _, poi = max(scored, key=lambda pair: (pair[0], pair[1].pid))
                 if u.task_id != poi.pid:
                     events.append(self._role(u, "SURVEY", "highest feasible bid", poi.pid))
                 u.role, u.task_id, u.mode = "SURVEY", poi.pid, "CONNECTED"
@@ -59,15 +65,55 @@ class HeuristicController:
                 u.role, u.task_id = "STANDBY", None
         return events
 
-    def move(self, uavs: list[UAV], pois: list[PoI], gcs: GCS, graph: ConnectivityGraph, dt: float) -> None:
+    def move(self, uavs: list[UAV], pois: list[PoI], gcs: GCS, graph: ConnectivityGraph, dt: float) -> list[dict]:
         by_id = {p.pid: p for p in pois}
+        events = []
+        planned = {}
         for u in uavs:
             if u.failed: continue
             if u.role in {"RETURN", "CHARGE"}: destination = gcs.position
             elif u.role == "SURVEY" and u.task_id in by_id: destination = by_id[u.task_id].position + np.array([0, 0, 50])
             elif u.role in {"RELAY", "RECOVER"}: destination = self._relay_waypoint(u, uavs, gcs, graph)
             else: destination = u.position
-            clamp_move(u, destination, dt)
+            raw = np.asarray(destination, dtype=float)
+            if self.terrain is not None:
+                terrain_fix = self.terrain.terrain_clear(u.position, raw, clearance_m=14.0)
+                if terrain_fix is not None:
+                    raw, peak = terrain_fix
+                    events.append({"event_type": "TERRAIN_AVOIDANCE", "actor_id": u.uid,
+                                   "related_id": u.task_id, "details": {"peak_elevation_m": round(float(peak), 3), "clearance_m": 14.0},
+                                   "cause": "predictive_terrain_intersection"})
+            if self.obstacles is not None:
+                detour = self.obstacles.detour(u.position, raw)
+                if detour is not None:
+                    raw, obstacle = detour
+                    events.append({"event_type": "OBSTACLE_AVOIDANCE", "actor_id": u.uid,
+                                   "related_id": u.task_id, "details": {"obstacle_id": obstacle.obstacle_id,
+                                   "kind": obstacle.kind, "clearance_m": self.obstacles.clearance_m},
+                                   "cause": "predictive_segment_intersection"})
+            delta = raw - u.position; distance = float(np.linalg.norm(delta))
+            step = min(distance, u.speed_mps * dt)
+            predicted = u.position if distance < 1e-9 else u.position + delta / distance * step
+            planned[u.uid] = (u, np.asarray(predicted, dtype=float), u.task_id)
+        # Resolve conflicts in predicted positions before any vehicle moves.
+        active = list(planned.values())
+        for _ in range(10):
+            for i, (a, ap, atask) in enumerate(active):
+                for b, bp, btask in active[i + 1:]:
+                    delta = ap - bp; distance = float(np.linalg.norm(delta))
+                    if distance < self.cfg.min_separation_m:
+                        direction = delta / distance if distance > 1e-9 else np.array([1.0, 0.0, 0.0])
+                        correction = direction * ((self.cfg.min_separation_m - distance) / 2.0 + 1.0)
+                        ap += correction; bp -= correction
+                        events.extend([{"event_type": "SAFETY_OVERRIDE", "actor_id": a.uid, "related_id": atask, "details": {"minimum_separation_m": self.cfg.min_separation_m}, "cause": "separation"},
+                                       {"event_type": "SAFETY_OVERRIDE", "actor_id": b.uid, "related_id": btask, "details": {"minimum_separation_m": self.cfg.min_separation_m}, "cause": "separation"}])
+            for u, destination, task in active:
+                before = destination.copy(); destination[:2] = np.clip(destination[:2], self.cfg.geofence_margin_m, self.cfg.arena_m - self.cfg.geofence_margin_m)
+                if not np.allclose(before, destination):
+                    events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid, "related_id": task, "details": {}, "cause": "geofence"})
+        for u, destination, _ in active:
+            advance_dynamics(u, destination, dt)
+        return events
 
     def _score(self, u: UAV, p: PoI, gcs: GCS, graph: ConnectivityGraph) -> float:
         d = u.distance_to(p.position)

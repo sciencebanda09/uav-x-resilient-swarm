@@ -22,6 +22,8 @@ class CCPLPolicy:
         self.agent: Any = None
         self.backend = "heuristic-fallback"
         self.checkpoint = checkpoint
+        self._last_observation: np.ndarray | None = None
+        self._last_action: int | None = None
         try:
             from ccpl import make_ccpl  # type: ignore
         except ImportError as exc:
@@ -59,7 +61,10 @@ class CCPLPolicy:
     def select_action(self, observation: np.ndarray) -> int:
         if self.agent is None:
             return 0
-        return int(self.agent.predict(np.asarray(observation, dtype=np.float32)))
+        obs = np.asarray(observation, dtype=np.float32)
+        if hasattr(self.agent, "select_action"):
+            return int(self.agent.select_action(obs, eval_mode=True))
+        return int(self.agent.predict(obs))
 
     def penalty(self, *, risk: float, distance: float, speed: float,
                 battery: float, connected: bool, priority: int,
@@ -70,6 +75,7 @@ class CCPLPolicy:
                                 priority=priority, relay=relay)
         if self.agent is not None:
             action = self.select_action(obs)
+            self._last_observation, self._last_action = obs, action
             return float(0.15 * action + 0.85 * (1.0 - battery) +
                          (0.35 if not connected else 0.0))
         consequence = (0.55 * (1.0 - float(np.clip(battery, 0, 1))) +
@@ -81,11 +87,22 @@ class CCPLPolicy:
     def record_transition(self, observation: np.ndarray, action: int,
                           reward: float, next_observation: np.ndarray,
                           consequence: float, done: bool) -> None:
-        return None
+        if self.agent is not None and hasattr(self.agent, "observe_transition"):
+            self.agent.observe_transition(observation, action, consequence)
+
+    def record_tick_consequence(self, consequence: float) -> None:
+        """Feed the latest delayed mission consequence into CCPL."""
+        if self.agent is not None and self._last_observation is not None and self._last_action is not None:
+            self.agent.observe_transition(self._last_observation, self._last_action, float(consequence))
 
     def save_checkpoint(self, path: str) -> None:
         if self.agent is not None and hasattr(self.agent, "save"):
             self.agent.save(path)
+
+    def train(self, env: Any, episodes: int = 10, update_freq: int = 4) -> list:
+        if self.agent is None:
+            raise CCPLUnavailable("CCPL training requires the standalone package")
+        return self.agent.fit(env, episodes=episodes, update_freq=update_freq, verbose=False)
 
     def backend_info(self) -> dict[str, Any]:
         return {"backend": self.backend, "checkpoint": self.checkpoint,
