@@ -14,6 +14,24 @@ npm run dev
 
 Load `runs/realistic_demo.json` in the viewer. The default scene is a 500 m bounded fallback terrain with obstacle metadata. Replace the scene assets referenced by `scene/scene_manifest.json` with optimized photogrammetry and GLTF files when available.
 
+The viewer starts with an automatic Low/Medium/High graphics preset. On an
+8 GB machine, keep `Auto` or `Low` selected. Low mode reduces terrain detail,
+shadows, trail length, repeated scene objects, and visible radio links. The
+viewer also supports 0.5×–5× playback speeds and incremental replay loading.
+
+The repository includes a Blender-free tiled terrain pipeline. Rebuild the
+lightweight scene tiles with:
+
+```powershell
+py -3.11 tools\build_realistic_scene.py
+```
+
+The default viewer keeps the satellite-textured terrain GLB because it is more
+visually natural on an 8 GB machine. The generated tiled terrain can be tested
+with `http://localhost:5173/?tiles=1`; it loads nearby tiles and unloads distant
+ones. If tiles are missing, the viewer falls back to the procedural terrain and
+the original compact terrain GLB.
+
 For an 8 GB machine, keep the active scene bounded, use collision proxy meshes, and provide low/medium/high LODs. Do not commit large source photogrammetry datasets; keep only the manifest, lightweight fallback assets, and acquisition instructions in Git.
 
 The viewer renders from the Python log and must not invent state. UAV positions, roles, battery, PoIs, links, and events all come from the canonical replay export. The procedural buildings, tower, bridge, and rubble use the same `scene/obstacles.json` AABB definitions consumed by predictive avoidance in the simulator.
