@@ -14,6 +14,7 @@ class HeuristicController:
         self.obstacles = obstacles
         self.terrain = terrain
         self.cooldown: dict[str, int] = {}
+        self.isolated_ticks: dict[str, int] = {}
         if policy not in {"auto", "heuristic", "ccpl"}:
             raise ValueError("policy must be auto, heuristic, or ccpl")
         self.ccpl = CCPLPolicy(seed=cfg.seed, checkpoint=checkpoint,
@@ -31,16 +32,25 @@ class HeuristicController:
             if u.failed:
                 continue
             self.cooldown[u.uid] = max(0, self.cooldown.get(u.uid, 0) - 1)
+            if u.role == "CHARGE":
+                continue
             home_need = u.distance_to(gcs.position) / max(u.speed_mps, 1) * 0.12
             if u.battery_pct <= self.cfg.reserve_pct + home_need:
                 if u.role != "RETURN": events.append(self._role(u, "RETURN", "battery reserve"))
                 u.role, u.task_id, u.mode = "RETURN", None, "RETURNING"
                 continue
             if not graph.reachable(u.uid):
+                self.isolated_ticks[u.uid] = self.isolated_ticks.get(u.uid, 0) + 1
                 if u.role not in {"RELAY", "RECOVER"}:
                     events.append(self._role(u, "RECOVER", "isolated route"))
                 u.role, u.mode = "RECOVER", "ISOLATED"
+                if u.task_id is not None:
+                    p = next((x for x in pois if x.pid == u.task_id), None)
+                    if p is not None and p.assigned_uav_id == u.uid and p.status != "SURVEYED":
+                        p.status, p.assigned_uav_id = "PENDING", None
+                u.task_id = None
                 continue
+            self.isolated_ticks[u.uid] = max(0, self.isolated_ticks.get(u.uid, 0) - 4)
             if u.mode == "ISOLATED": u.mode = "CONNECTED"
             if self._relay_needed(u, uavs, graph):
                 if u.role != "RELAY": events.append(self._role(u, "RELAY", "route preservation"))
@@ -72,8 +82,19 @@ class HeuristicController:
         for u in uavs:
             if u.failed: continue
             if u.role in {"RETURN", "CHARGE"}: destination = gcs.position
-            elif u.role == "SURVEY" and u.task_id in by_id: destination = by_id[u.task_id].position + np.array([0, 0, 50])
-            elif u.role in {"RELAY", "RECOVER"}: destination = self._relay_waypoint(u, uavs, gcs, graph)
+            elif u.role == "SURVEY" and u.task_id in by_id:
+                poi = by_id[u.task_id]
+                destination = poi.position.copy()
+                agl = self.cfg.survey_altitude_agl_m
+                if self.terrain is not None:
+                    destination[2] = self.terrain.height_at(poi.position[0], poi.position[1]) + agl
+                else:
+                    destination[2] = poi.position[2] + agl
+            elif u.role in {"RELAY", "RECOVER"}:
+                if u.role == "RECOVER" and self.isolated_ticks.get(u.uid, 0) > 20:
+                    destination = gcs.position
+                else:
+                    destination = self._relay_waypoint(u, uavs, gcs, graph)
             else: destination = u.position
             raw = np.asarray(destination, dtype=float)
             if self.terrain is not None:
@@ -113,6 +134,40 @@ class HeuristicController:
                     events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid, "related_id": task, "details": {}, "cause": "geofence"})
         for u, destination, _ in active:
             advance_dynamics(u, destination, dt)
+        # The dynamics integrator can overshoot a planned point.  Apply a
+        # second, state-level shield after integration so the recorded flight
+        # trajectory—not only the planned waypoint—obeys separation and the
+        # geofence constraints.
+        moved = [u for u, _, _ in active]
+        for _ in range(20):
+            changed = False
+            for i, a in enumerate(moved):
+                for b in moved[i + 1:]:
+                    delta = a.position - b.position
+                    distance = float(np.linalg.norm(delta))
+                    if distance < self.cfg.min_separation_m:
+                        direction = delta / distance if distance > 1e-9 else np.array([1.0, 0.0, 0.0])
+                        correction = direction * ((self.cfg.min_separation_m - distance) / 2.0 + 0.05)
+                        a.position += correction; b.position -= correction
+                        a.velocity[:] = 0.0; b.velocity[:] = 0.0
+                        events.extend([{"event_type": "SAFETY_OVERRIDE", "actor_id": a.uid,
+                                        "related_id": a.task_id, "details": {"minimum_separation_m": self.cfg.min_separation_m,
+                                        "phase": "post_dynamics"}, "cause": "separation"},
+                                       {"event_type": "SAFETY_OVERRIDE", "actor_id": b.uid,
+                                        "related_id": b.task_id, "details": {"minimum_separation_m": self.cfg.min_separation_m,
+                                        "phase": "post_dynamics"}, "cause": "separation"}])
+                        changed = True
+            for u in moved:
+                before = u.position.copy()
+                u.position[:2] = np.clip(u.position[:2], self.cfg.geofence_margin_m,
+                                         self.cfg.arena_m - self.cfg.geofence_margin_m)
+                if not np.allclose(before, u.position):
+                    u.velocity[:2] = 0.0
+                    events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid,
+                                   "related_id": u.task_id, "details": {"phase": "post_dynamics"},
+                                   "cause": "geofence"})
+            if not changed:
+                break
         return events
 
     def _score(self, u: UAV, p: PoI, gcs: GCS, graph: ConnectivityGraph) -> float:
@@ -130,9 +185,20 @@ class HeuristicController:
         return len(graph.route(u.uid)) >= 3 and graph.quality(u.uid) < 0.78
 
     def _relay_waypoint(self, u: UAV, uavs: list[UAV], gcs: GCS, graph: ConnectivityGraph) -> np.ndarray:
-        connected = [x for x in uavs if not x.failed and graph.reachable(x.uid)]
+        connected = [x for x in uavs if not x.failed and x.uid != u.uid and graph.reachable(x.uid)
+                     and x.battery_pct > self.cfg.reserve_pct + 8.0]
         if not connected: return gcs.position
-        anchor = min(connected, key=lambda x: x.distance_to(gcs.position))
+        # Prefer a relay anchor that improves route quality while retaining
+        # battery reserve.  The old nearest-to-GCS rule could repeatedly pick
+        # a weak or nearly depleted relay and create oscillation.
+        def relay_score(candidate: UAV) -> tuple[float, str]:
+            distance = candidate.distance_to(gcs.position)
+            quality = graph.quality(candidate.uid)
+            redundancy = graph.redundancy(candidate.uid)
+            battery_margin = max(0.0, candidate.battery_pct - self.cfg.reserve_pct) / 100.0
+            score = quality * 100.0 + redundancy * 12.0 + battery_margin * 10.0 - distance * 0.08
+            return score, candidate.uid
+        anchor = max(connected, key=relay_score)
         return (anchor.position + gcs.position) / 2.0
 
     @staticmethod
