@@ -27,6 +27,10 @@ class UAV:
     max_tilt_rad: float = math.radians(28.0)
     max_yaw_rate_rps: float = math.radians(70.0)
     climb_rate_mps: float = 8.0
+    battery_capacity_wh: float = 720.0
+    energy_used_wh: float = 0.0
+    drag_area_m2: float = 0.55
+    propulsion_efficiency: float = 0.72
 
     def __post_init__(self) -> None:
         self.position = np.asarray(self.position, dtype=float)
@@ -77,6 +81,19 @@ class ScenarioConfig:
     geofence_margin_m: float = 2.0
     initial_battery_pct: float = 100.0
     return_home_time_s: float | None = None
+    fleet_size: int = 6
+    payload_kg: float = 1.5
+    wind_scale: float = 1.0
+    gps_noise_m: float = 0.0
+    imu_noise_mps2: float = 0.0
+    telemetry_delay_ticks: int = 0
+    radio_bandwidth_kbps: float = 1800.0
+    packet_queue_kb: float = 256.0
+    retransmit_limit: int = 0
+    sensor_mode: str = "metadata"
+    survey_altitude_agl_m: float = 50.0
+    camera_fov_deg: float = 70.0
+    survey_dwell_s: float = 8.0
 
     @property
     def ticks(self) -> int:
@@ -112,7 +129,11 @@ def advance_dynamics(uav: UAV, destination: np.ndarray, dt: float) -> None:
     acceleration = desired - uav.velocity
     norm = float(np.linalg.norm(acceleration))
     if norm > max_accel: acceleration *= max_accel / norm
-    acceleration += (uav.wind_mps - uav.velocity) * 0.08
+    # Quadratic aerodynamic drag acts on air-relative velocity.  This keeps
+    # wind useful as a disturbance without treating it as an arbitrary force.
+    air_relative = uav.velocity - uav.wind_mps
+    drag_factor = 0.5 * 1.225 * uav.drag_area_m2 / max(uav.mass_kg, 0.1)
+    acceleration += -drag_factor * air_relative * float(np.linalg.norm(air_relative))
     uav.acceleration_mps2 = acceleration
     uav.velocity += acceleration * dt
     speed_limit = uav.speed_mps * battery_factor
@@ -130,14 +151,33 @@ def advance_dynamics(uav: UAV, destination: np.ndarray, dt: float) -> None:
     uav.attitude_rpy_rad += uav.angular_velocity_rps * dt * 0.35
     uav.attitude_rpy_rad[:2] = np.clip(uav.attitude_rpy_rad[:2], -uav.max_tilt_rad, uav.max_tilt_rad)
     uav.attitude_rpy_rad[2] = (uav.attitude_rpy_rad[2] + math.pi) % (2*math.pi) - math.pi
-    hover = uav.mass_kg * 9.81 / 6.0
-    thrust = hover + (uav.acceleration_mps2[2] + 9.81) * uav.mass_kg / 6.0
+    # Total thrust must balance gravity at hover; do not add gravity twice.
+    thrust = (uav.acceleration_mps2[2] + 9.81) * uav.mass_kg / 6.0
     thrust = float(np.clip(thrust, 0.0, uav.max_thrust_n / 6.0 * battery_factor))
     uav.motor_thrust_n[:] = thrust
 
 def battery_step(uav: UAV, dt: float) -> None:
-    motion = float(np.linalg.norm(uav.velocity))
-    uav.battery_pct = max(0.0, uav.battery_pct - dt * (0.035 + 0.004 * motion))
+    return battery_step_with_load(uav, dt)
+
+def battery_step_with_load(uav: UAV, dt: float, payload_kg: float = 0.0,
+                           wind_scale: float = 1.0) -> None:
+    dt = max(float(dt), 0.0)
+    speed = float(np.linalg.norm(uav.velocity))
+    airspeed = float(np.linalg.norm(uav.velocity - uav.wind_mps * max(0.0, wind_scale)))
+    climb = abs(float(uav.velocity[2]))
+    mass = uav.mass_kg + max(0.0, float(payload_kg))
+    gravity = mass * 9.81
+    # Induced power for a small multirotor disk, plus profile/parasite power.
+    rotor_disk_area = 0.72
+    induced = gravity * math.sqrt(gravity / max(2.0 * 1.225 * rotor_disk_area, 1e-6))
+    hover_power = induced / max(uav.propulsion_efficiency, 0.2)
+    parasite_power = 0.5 * 1.225 * uav.drag_area_m2 * airspeed**3
+    climb_power = gravity * climb / max(uav.propulsion_efficiency, 0.2)
+    power_w = max(80.0, hover_power + parasite_power + climb_power)
+    energy_wh = power_w * dt / 3600.0
+    uav.energy_used_wh += energy_wh
+    capacity = max(float(uav.battery_capacity_wh), 1.0)
+    uav.battery_pct = max(0.0, uav.battery_pct - energy_wh / capacity * 100.0)
 
 def safe_destination(current: np.ndarray, destination: np.ndarray, others: list[np.ndarray],
                      minimum_m: float, arena_m: float, margin_m: float = 2.0) -> tuple[np.ndarray, list[str]]:
