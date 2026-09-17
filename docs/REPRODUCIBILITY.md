@@ -8,6 +8,21 @@ python -m uav_x.simulation.runner --seed 7 --duration 120
 python -m uav_x.visualization.operations_2d runs/uav_x_run.jsonl
 ```
 
+For long runs, flush the canonical log incrementally:
+
+```powershell
+py -3.11 -m uav_x.simulation.runner --duration 120 --stream --out runs\streamed.jsonl
+```
+
+Generate the complete benchmark report:
+
+```powershell
+python -m uav_x.benchmarks --all --duration 120 --out reports/stage1_benchmark.json
+```
+
+The benchmark uses seeds 7, 17, and 27 across six challenge-facing scenarios
+and writes per-seed plus aggregate statistics.
+
 The canonical log format is `uav-x-log/v1` JSONL. Every run records its seed, simulator parameters, per-tick UAV/PoI/link state, events, and final metrics. Re-running with the same seed and configuration produces identical records.
 
 MATLAB is optional and consumes the frozen log after the Python run:
