@@ -27,3 +27,20 @@ def test_heuristic_policy_is_explicit(tmp_path):
     records = read_jsonl(str(path))
     assert records[0]["policy"] == "heuristic"
     assert records[0]["ccpl"]["backend"] == "heuristic-fallback"
+
+def test_streaming_run_writes_complete_log(tmp_path):
+    path = tmp_path / "stream.jsonl"
+    records = run(ScenarioConfig(seed=5, duration_s=3, sensor_mode="camera_metadata"),
+                  str(path), policy="heuristic", streaming=True)
+    persisted = read_jsonl(str(path))
+    assert len(persisted) == len(records)
+    assert persisted[-1]["record_type"] == "summary"
+    tick = next(record for record in persisted if record["record_type"] == "tick")
+    assert tick["uavs"][0]["sensors"]["camera"]["width"] == 320
+
+def test_configurable_fleet_size_and_sensor_noise():
+    records = run(ScenarioConfig(seed=6, duration_s=2, fleet_size=10,
+                                 gps_noise_m=0.5, imu_noise_mps2=0.1), policy="heuristic")
+    tick = next(record for record in records if record["record_type"] == "tick")
+    assert len(tick["uavs"]) == 10
+    assert tick["uavs"][0]["sensors"]["gps_position_m"] is not None
