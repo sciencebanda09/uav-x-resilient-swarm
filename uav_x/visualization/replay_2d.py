@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.patches import Circle
 from ..interfaces.log_schema import read_jsonl
 
 ROLE_COLORS = {"SURVEY": "#39d98a", "RELAY": "#45aaf2", "RECOVER": "#ffb547",
@@ -26,21 +27,31 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
         ax.set_title(f"UAV-X OPERATIONS REPLAY   t = {tick['time_s']:.1f}s", color="#ffffff", loc="left", fontweight="bold")
         ax.set_xlabel("East (m)", color="#aab4c3"); ax.set_ylabel("North (m)", color="#aab4c3")
         ax.add_patch(plt.Rectangle((2, 2), 496, 496, fill=False, edgecolor="#ffce56", linewidth=1.5, linestyle="--"))
+        ax.scatter(40, 40, marker="s", s=150, c="#45aaf2", edgecolors="white", zorder=6)
+        ax.annotate("GCS\ncommand + data sink", (40, 40), xytext=(8, 8), textcoords="offset points", color="#45aaf2", fontsize=7, bbox=dict(facecolor="#101722", alpha=.8, edgecolor="#45aaf2", pad=2))
         for link in tick.get("links", []):
             if not link["available"]: continue
             a = next((u for u in tick["uavs"] if u["id"] == link["source_id"]), None); b = next((u for u in tick["uavs"] if u["id"] == link["target_id"]), None)
             if a and b:
                 q = 1.0 - link["packet_loss"]; ax.plot([a["position_m"][0], b["position_m"][0]], [a["position_m"][1], b["position_m"][1]], color=(.2, .8, .95, max(.12, q*.7)), linewidth=1 + q*2)
-        for p in tick["pois"]:
+        for poi_index, p in enumerate(tick["pois"]):
             color = "#39d98a" if p["status"] == "SURVEYED" else "#ff4d6d" if p["priority"] == 1 else "#ffb547"
             ax.scatter(p["position_m"][0], p["position_m"][1], c=color, marker="*", s=160, edgecolors="white", linewidth=.4)
-            ax.text(p["position_m"][0]+5, p["position_m"][1]+4, f"{p['id']} {p['survey_progress']*100:.0f}%", color="#d8e2f0", fontsize=7)
-        for u in tick["uavs"]:
+            ax.annotate(f"{p['id']} {p['survey_progress']*100:.0f}%", (p["position_m"][0], p["position_m"][1]), xytext=(6 + (poi_index % 3) * 8, 4 + (poi_index % 2) * 10), textcoords="offset points", color="#d8e2f0", fontsize=7, bbox=dict(facecolor="#101722", alpha=.72, edgecolor="none", pad=1.5))
+        for uav_index, u in enumerate(tick["uavs"]):
             x, y, _ = u["position_m"]; color = "#65748b" if u.get("failed") else ROLE_COLORS.get(u["role"], "white")
-            ax.scatter(x, y, s=110, c=color, edgecolors="white", linewidth=.6, zorder=4); ax.text(x+5, y+5, f"{u['id']}\n{u['role']}", color="#ffffff", fontsize=7)
+            ax.scatter(x, y, s=110, c=color, edgecolors="white", linewidth=.6, zorder=4)
+            ax.annotate(f"{u['id']}\n{u['role']}", (x, y), xytext=(8 + (uav_index % 3) * 18, -12 - (uav_index % 2) * 15), textcoords="offset points", color="#ffffff", fontsize=6.5, bbox=dict(facecolor="#101722", alpha=.72, edgecolor="none", pad=1.2), zorder=5)
+            if u.get("survey_capture_active") and u.get("survey_footprint_radius_m", 0) > 0:
+                ax.add_patch(Circle((x, y), u["survey_footprint_radius_m"], facecolor="#39d98a", edgecolor="#39d98a", alpha=.12, linewidth=1.2, zorder=1))
+            if u.get("task_id"):
+                target = next((p for p in tick["pois"] if p["id"] == u["task_id"]), None)
+                if target:
+                    ax.plot([x, target["position_m"][0]], [y, target["position_m"][1]], color="#39d98a", linestyle="--", linewidth=1.5, alpha=.75, zorder=2)
+        ax.text(.02, .02, "GREEN dashed = assigned survey task   |   blue = relay/data route   |   translucent circle = camera footprint", transform=ax.transAxes, color="#d8e2f0", fontsize=8, bbox=dict(facecolor="#101722", alpha=.85, edgecolor="#45aaf2", pad=4))
         status.set_title("SWARM STATUS", loc="left", fontweight="bold"); status.axis("off")
         active = [u for u in tick["uavs"] if not u.get("failed")]; connected = sum(u["gcs_reachable"] for u in active); surveyed = sum(p["status"] == "SURVEYED" for p in tick["pois"])
-        wind = tick.get("weather", {}).get("wind_mps", [0, 0, 0]); status.text(.02, .96, f"CONNECTED   {connected}/{len(active)}\nSURVEYED    {surveyed}/{len(tick['pois'])}\nWIND        {wind[0]:.1f}, {wind[1]:.1f} m/s\n", color="#ffffff", va="top", fontsize=11, linespacing=1.5)
+        wind = tick.get("weather", {}).get("wind_mps", [0, 0, 0]); coverage = tick.get("survey_coverage_fraction", 0.0) * 100.0; status.text(.02, .96, f"CONNECTED   {connected}/{len(active)}\nSURVEYED    {surveyed}/{len(tick['pois'])}\nMAPPED      {coverage:.1f}%\nWIND        {wind[0]:.1f}, {wind[1]:.1f} m/s\n", color="#ffffff", va="top", fontsize=11, linespacing=1.5)
         y = .78
         for u in tick["uavs"]:
             status.text(.02, y, f"{u['id']}  {u['battery_pct']:5.1f}%  {u['role']}", color=ROLE_COLORS.get(u["role"], "#aab4c3"), fontsize=8); y -= .055
