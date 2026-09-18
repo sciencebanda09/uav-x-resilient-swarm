@@ -31,6 +31,8 @@ class UAV:
     energy_used_wh: float = 0.0
     drag_area_m2: float = 0.55
     propulsion_efficiency: float = 0.72
+    survey_capture_active: bool = False
+    survey_footprint_radius_m: float = 0.0
 
     def __post_init__(self) -> None:
         self.position = np.asarray(self.position, dtype=float)
