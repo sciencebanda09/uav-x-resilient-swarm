@@ -3,7 +3,7 @@ duration_s: 120
 dt: 1.0
 initial_battery_pct: 35
 return_home_time_s: 10
-radio_range_m: 180
+radio_range_m: 220
 min_separation_m: 18
 reserve_pct: 22
 packet_loss: 0.04

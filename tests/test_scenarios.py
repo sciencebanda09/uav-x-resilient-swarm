@@ -95,3 +95,13 @@ def test_simultaneous_failure_outage_completes_most_pois():
     assert summary["mission_completion_rate"] >= 0.75
     assert summary["battery_violations"] == 0
     assert summary["geofence_violations"] == 0
+
+def test_separation_shield_maintains_margin_not_just_bare_minimum():
+    """Regression: the predictive separation shield must resolve conflicts to a
+    genuine safety margin above min_separation_m, not merely clear the bare
+    threshold — a shield that only pushes UAVs to exactly the minimum will have
+    them drift back into conflict on the very next tick, reporting a trajectory
+    minimum that hovers at the boundary instead of showing real headroom."""
+    summary = run(ScenarioConfig(seed=7, duration_s=120), policy="heuristic")[-1]
+    cfg_min = ScenarioConfig(seed=7, duration_s=120).min_separation_m
+    assert summary["minimum_inter_uav_separation_m"] >= cfg_min * 1.1

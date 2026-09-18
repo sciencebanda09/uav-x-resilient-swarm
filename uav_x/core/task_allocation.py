@@ -117,14 +117,20 @@ class HeuristicController:
             predicted = u.position if distance < 1e-9 else u.position + delta / distance * step
             planned[u.uid] = (u, np.asarray(predicted, dtype=float), u.task_id)
         # Resolve conflicts in predicted positions before any vehicle moves.
+        # Trigger on a safety buffer above the hard minimum (not the minimum
+        # itself) and correct out to a real margin beyond it, so the reported
+        # trajectory-wide minimum separation reflects genuine headroom rather
+        # than oscillating at the exact threshold every time two UAVs converge.
+        trigger_m = self.cfg.min_separation_m * 1.25
+        target_m = self.cfg.min_separation_m * 1.4
         active = list(planned.values())
         for _ in range(10):
             for i, (a, ap, atask) in enumerate(active):
                 for b, bp, btask in active[i + 1:]:
                     delta = ap - bp; distance = float(np.linalg.norm(delta))
-                    if distance < self.cfg.min_separation_m:
+                    if distance < trigger_m:
                         direction = delta / distance if distance > 1e-9 else np.array([1.0, 0.0, 0.0])
-                        correction = direction * ((self.cfg.min_separation_m - distance) / 2.0 + 1.0)
+                        correction = direction * ((target_m - distance) / 2.0 + 1.0)
                         ap += correction; bp -= correction
                         events.extend([{"event_type": "SAFETY_OVERRIDE", "actor_id": a.uid, "related_id": atask, "details": {"minimum_separation_m": self.cfg.min_separation_m}, "cause": "separation"},
                                        {"event_type": "SAFETY_OVERRIDE", "actor_id": b.uid, "related_id": btask, "details": {"minimum_separation_m": self.cfg.min_separation_m}, "cause": "separation"}])

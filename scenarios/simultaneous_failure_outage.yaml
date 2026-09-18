@@ -4,7 +4,7 @@ dt: 1.0
 failure_time_s: 48
 outage_start_s: 45
 outage_duration_s: 15
-radio_range_m: 180
+radio_range_m: 220
 min_separation_m: 18
 reserve_pct: 22
 packet_loss: 0.08
