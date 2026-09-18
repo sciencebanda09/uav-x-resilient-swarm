@@ -1,4 +1,4 @@
-function operations_2d(path)
+function operations_2d(path, output)
 %OPERATIONS_2D Optional MATLAB operations view for uav-x-log/v1.
 records = load_log(path);
 tick = records{find(cellfun(@(r) strcmp(r.record_type, 'tick'), records), 1, 'last')};
@@ -16,4 +16,7 @@ for i = 1:numel(tick.pois)
     scatter(xy(1), xy(2), 110, c, '*');
 end
 title('UAV-X resilient swarm operations'); xlabel('East (m)'); ylabel('North (m)');
+if nargin >= 2 && strlength(string(output)) > 0
+    exportgraphics(gcf, output, 'Resolution', 150);
+end
 end
