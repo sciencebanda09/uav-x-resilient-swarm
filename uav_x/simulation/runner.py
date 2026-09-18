@@ -36,6 +36,7 @@ def run(cfg: ScenarioConfig, out_path: str | None = None,
         scenario_name: str = "baseline", streaming: bool = False) -> list[dict]:
     seeds = SeedManager(cfg.seed); rng = seeds.get("network"); run_id = f"seed-{cfg.seed}"
     gcs, uavs, pois = default_world(cfg); heightmap_path = Path(__file__).resolve().parents[2] / "viewer" / "public" / "scene" / "terrain_heightmap.json"; terrain = TerrainModel(cfg.arena_m, cfg.seed, heightmap_path=str(heightmap_path) if heightmap_path.exists() else None)
+    gcs.position[2] = terrain.height_at(gcs.position[0], gcs.position[1]) + 20.0
     for p in pois:
         p.position[2] = terrain.height_at(p.position[0], p.position[1])
     weather_model = WeatherModel(cfg.seed); graph = ConnectivityGraph(gcs, cfg.radio_range_m, cfg.packet_loss, rng, terrain=terrain, bandwidth_kbps=cfg.radio_bandwidth_kbps, queue_kb=cfg.packet_queue_kb, retransmit_limit=cfg.retransmit_limit)
@@ -70,6 +71,8 @@ def run(cfg: ScenarioConfig, out_path: str | None = None,
             records.append(LogEnvelope(run_id, "event", tick, t, payload=event).to_dict())
         for u in uavs:
             if u.failed: continue
+            u.survey_capture_active = False
+            u.survey_footprint_radius_m = 0.0
             battery_step_with_load(u, cfg.dt, payload_kg=cfg.payload_kg, wind_scale=cfg.wind_scale)
             if u.battery_pct < cfg.reserve_pct and u.role not in {"RETURN", "CHARGE"}:
                 records.append(LogEnvelope(run_id, "event", tick, t, payload={"event_type": "SAFETY_VIOLATION", "actor_id": u.uid, "related_id": None, "details": {"battery_pct": u.battery_pct, "reserve_pct": cfg.reserve_pct}, "cause": "battery_reserve"}).to_dict())
@@ -84,6 +87,8 @@ def run(cfg: ScenarioConfig, out_path: str | None = None,
                 stable = float(np.linalg.norm(u.velocity[:2])) <= 5.5
                 in_capture_cone = 15.0 <= agl <= 120.0 and horizontal_error <= fov_radius and stable
                 if in_capture_cone:
+                    u.survey_capture_active = True
+                    u.survey_footprint_radius_m = fov_radius
                     coverage.mark_footprint(u.position[0], u.position[1], fov_radius)
                     p.survey_progress = min(1.0, p.survey_progress + cfg.dt / max(cfg.survey_dwell_s, 0.1))
                     if p.survey_progress >= 1.0: p.status = "SURVEYED"
@@ -97,7 +102,7 @@ def run(cfg: ScenarioConfig, out_path: str | None = None,
         if packets:
             controller.ccpl.record_tick_consequence(
                 1.0 - sum(p["delivered"] for p in packets) / len(packets))
-        tick_uavs = [{"id": u.uid, "vehicle_type": u.vehicle_type, "velocity_mps": [round(float(x),4) for x in u.velocity], "acceleration_mps2": [round(float(x),4) for x in u.acceleration_mps2], "attitude_rpy_rad": [round(float(x),5) for x in u.attitude_rpy_rad], "angular_velocity_rps": [round(float(x),5) for x in u.angular_velocity_rps], "motor_thrust_n": [round(float(x),3) for x in u.motor_thrust_n], "tilt_deg": round(float(np.degrees(np.linalg.norm(u.attitude_rpy_rad[:2]))), 3), "vertical_speed_mps": round(float(u.velocity[2]), 4), "wind_mps": [round(float(x),4) for x in u.wind_mps], "position_m": [round(float(x), 4) for x in u.position], "battery_pct": round(u.battery_pct, 3), "role": u.role, "task_id": u.task_id, "mode": u.mode, "route_to_gcs": graph.route(u.uid), "hop_count": max(0, len(graph.route(u.uid))-1), "gcs_reachable": graph.reachable(u.uid), "link_quality": round(graph.quality(u.uid), 4), "failed": u.failed, "sensors": sensors.read(u)} for u in uavs]
+        tick_uavs = [{"id": u.uid, "vehicle_type": u.vehicle_type, "velocity_mps": [round(float(x),4) for x in u.velocity], "acceleration_mps2": [round(float(x),4) for x in u.acceleration_mps2], "attitude_rpy_rad": [round(float(x),5) for x in u.attitude_rpy_rad], "angular_velocity_rps": [round(float(x),5) for x in u.angular_velocity_rps], "motor_thrust_n": [round(float(x),3) for x in u.motor_thrust_n], "tilt_deg": round(float(np.degrees(np.linalg.norm(u.attitude_rpy_rad[:2]))), 3), "vertical_speed_mps": round(float(u.velocity[2]), 4), "wind_mps": [round(float(x),4) for x in u.wind_mps], "position_m": [round(float(x), 4) for x in u.position], "battery_pct": round(u.battery_pct, 3), "role": u.role, "task_id": u.task_id, "mode": u.mode, "route_to_gcs": graph.route(u.uid), "hop_count": max(0, len(graph.route(u.uid))-1), "gcs_reachable": graph.reachable(u.uid), "link_quality": round(graph.quality(u.uid), 4), "failed": u.failed, "survey_capture_active": u.survey_capture_active, "survey_footprint_radius_m": round(float(u.survey_footprint_radius_m), 3), "sensors": sensors.read(u)} for u in uavs]
         for item, u in zip(tick_uavs, uavs):
             item["energy_used_wh"] = round(float(u.energy_used_wh), 4)
             item["battery_capacity_wh"] = round(float(u.battery_capacity_wh), 3)
