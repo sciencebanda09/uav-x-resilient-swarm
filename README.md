@@ -104,6 +104,7 @@ python -m uav_x.validation --out reports\validation.json
 Run tests:
 
 ```powershell
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
