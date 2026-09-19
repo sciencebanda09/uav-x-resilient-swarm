@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from ..interfaces.log_schema import read_jsonl
 
 def render(path: str, output: str | None = None) -> None:
@@ -14,9 +15,18 @@ def render(path: str, output: str | None = None) -> None:
     ticks = [r for r in read_jsonl(path) if r["record_type"] == "tick"]
     if not ticks: raise ValueError("log has no tick records")
     last = ticks[-1]; fig, ax = plt.subplots(figsize=(10, 8)); ax.set_title("UAV-X resilient swarm operations")
+    obstacle_path = Path(__file__).resolve().parents[2] / "scene" / "obstacles.json"
+    if obstacle_path.exists():
+        import json
+        for obstacle in json.loads(obstacle_path.read_text(encoding="utf-8")).get("obstacles", []):
+            cx, cy, _ = obstacle["center_m"]; sx, sy, _ = obstacle["size_m"]
+            ax.add_patch(Rectangle((cx - sx / 2, cy - sy / 2), sx, sy, facecolor="#a66b45", edgecolor="#333333", alpha=.25, zorder=0))
+    role_seen = set()
     for u in last["uavs"]:
-        ax.scatter(u["position_m"][0], u["position_m"][1], s=90, label=f'{u["id"]} {u["role"]}')
-        ax.annotate(u["id"], u["position_m"][:2])
+        role = u["role"]
+        label = role if role not in role_seen else "_nolegend_"
+        role_seen.add(role)
+        ax.scatter(u["position_m"][0], u["position_m"][1], s=90, label=label)
     for p in last["pois"]:
         color = "green" if p["status"] == "SURVEYED" else ("red" if p["priority"] == 1 else "orange")
         ax.scatter(p["position_m"][0], p["position_m"][1], marker="*", c=color, s=130)
