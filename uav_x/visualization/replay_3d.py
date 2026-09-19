@@ -4,6 +4,7 @@ import argparse, json
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from ..interfaces.log_schema import read_jsonl
 
@@ -17,11 +18,24 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
     else:
         axis = np.linspace(0, 500, 20); X, Y = np.meshgrid(axis, axis); Z = 4 + 7*np.sin(X/110) * np.cos(Y/130)
     terrain_max = float(np.max(Z))
+    obstacle_path = Path(__file__).resolve().parents[2] / "scene" / "obstacles.json"
+    obstacles = json.loads(obstacle_path.read_text(encoding="utf-8")).get("obstacles", []) if obstacle_path.exists() else []
+
+    def draw_box(obstacle):
+        center = np.asarray(obstacle["center_m"], dtype=float); size = np.asarray(obstacle["size_m"], dtype=float) / 2.0
+        x0, x1 = center[0] - size[0], center[0] + size[0]; y0, y1 = center[1] - size[1], center[1] + size[1]; z0, z1 = center[2] - size[2], center[2] + size[2]
+        vertices = np.array([[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]])
+        faces = [[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]]
+        kind = obstacle.get("kind", "obstacle")
+        color = "#c06b42" if kind == "building" else "#4f8fc9" if kind == "tower" else "#8b7355"
+        ax.add_collection3d(Poly3DCollection([vertices[face] for face in faces], facecolors=color, edgecolors="#f4f4f4", linewidths=.6, alpha=.78))
     def draw(index: int):
         tick = ticks[index]; ax.clear(); ax.set_facecolor("#08111c"); ax.set_xlim(0, 500); ax.set_ylim(0, 500); ax.set_zlim(0, max(140, terrain_max + 65)); ax.view_init(elev=38, azim=35 + index*.4)
         ax.set_xlabel("East"); ax.set_ylabel("North"); ax.set_zlabel("Altitude"); ax.set_title(f"UAV-X CINEMATIC REPLAY  |  t={tick['time_s']:.1f}s", color="white", pad=12)
         ax.plot_surface(X, Y, Z, cmap="gist_earth", alpha=.48, linewidth=0, antialiased=True,
                         shade=True, edgecolor=(.08, .12, .10, .12))
+        for obstacle in obstacles:
+            draw_box(obstacle)
         gcs_index = int(np.clip(round(40 / 500 * (len(axis) - 1)), 0, len(axis) - 1))
         ax.scatter(40, 40, float(Z[gcs_index, gcs_index]) + 20, c="#00c8ff", marker="s", s=90, edgecolors="black", linewidth=.8, depthshade=False)
         for link in tick.get("links", []):
@@ -35,8 +49,6 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
             color = "#9aa0a6" if u.get("failed") else {"SURVEY":"#00ff66", "RELAY":"#00c8ff", "RECOVER":"#ff9d00", "RETURN":"#ff3158", "CHARGE":"#d86cff"}.get(u["role"], "#ffffff")
             ax.plot([x, x], [y, y], [float(np.min(Z)), z], color=color, alpha=.28, linewidth=.8)
             ax.scatter(x, y, z, c=color, s=115, marker="^", edgecolors="black", linewidth=1.0, depthshade=False)
-            ax.text(x, y, z+5+(uav_index%3)*2, u["id"], color="white", fontsize=7, fontweight="bold",
-                    bbox=dict(facecolor="black", alpha=.7, edgecolor=color, pad=1.5))
             if u.get("task_id"):
                 target = next((p for p in tick["pois"] if p["id"] == u["task_id"]), None)
                 if target:
@@ -45,8 +57,10 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
                 theta = np.linspace(0, 2*np.pi, 40); radius = u["survey_footprint_radius_m"]
                 ax.plot(x + radius*np.cos(theta), y + radius*np.sin(theta), np.full_like(theta, z), color="#00ff66", alpha=.55, linewidth=1.2)
         coverage = tick.get("survey_coverage_fraction", 0.0) * 100.0
-        ax.text2D(.02, .94, f"Connected: {sum(u['gcs_reachable'] for u in tick['uavs'] if not u.get('failed'))}/{len(tick['uavs'])}   |   Surveyed: {sum(p['status']=='SURVEYED' for p in tick['pois'])}/{len(tick['pois'])}   |   Mapped: {coverage:.1f}%", transform=ax.transAxes, color="white")
-        ax.text2D(.02, .02, "GREEN dashed = survey assignment   |   green ring = camera footprint   |   cyan square = GCS", transform=ax.transAxes, color="white", fontsize=8, bbox=dict(facecolor="black", alpha=.75, edgecolor="#00c8ff", pad=4))
+        connected = sum(u['gcs_reachable'] for u in tick['uavs'] if not u.get('failed'))
+        surveyed = sum(p['status']=='SURVEYED' for p in tick['pois'])
+        ax.text2D(.02, .94, f"Connected: {connected}/{len(tick['uavs'])}   |   Surveyed: {surveyed}/{len(tick['pois'])}   |   Mapped: {coverage:.1f}%", transform=ax.transAxes, color="white")
+        ax.text2D(.02, .02, "GREEN dashed = survey assignment | green ring = camera footprint | gray/orange/blue = obstacles | cyan square = GCS", transform=ax.transAxes, color="white", fontsize=8, bbox=dict(facecolor="black", alpha=.75, edgecolor="#00c8ff", pad=4))
     anim = FuncAnimation(fig, draw, frames=len(ticks), interval=interval_ms, repeat=False)
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True); suffix = Path(output).suffix.lower(); anim.save(output, writer="pillow" if suffix == ".gif" else None, dpi=120)
