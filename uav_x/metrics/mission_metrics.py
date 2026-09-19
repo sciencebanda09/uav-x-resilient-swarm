@@ -69,5 +69,7 @@ def summarize(records: list[dict]) -> dict:
             "battery_violations": sum(e.get("cause") == "battery_reserve" for e in safety_violations),
             "geofence_violations": sum(e.get("cause") == "geofence" for e in safety_violations),
             "obstacle_violations": sum(e.get("cause") in {"obstacle", "terrain"} for e in safety_violations),
+            "obstacle_interventions": sum(e.get("cause") == "obstacle" for e in safety_overrides),
+            "terrain_interventions": sum(e.get("cause") == "terrain" for e in safety_overrides),
             "minimum_inter_uav_separation_m": min(separations) if separations else None,
             "event_counts": dict(Counter(e.get("event_type") for e in events))}
