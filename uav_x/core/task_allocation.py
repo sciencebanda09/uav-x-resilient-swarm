@@ -138,6 +138,7 @@ class HeuristicController:
                 before = destination.copy(); destination[:2] = np.clip(destination[:2], self.cfg.geofence_margin_m, self.cfg.arena_m - self.cfg.geofence_margin_m)
                 if not np.allclose(before, destination):
                     events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid, "related_id": task, "details": {}, "cause": "geofence"})
+        previous_positions = {u.uid: u.position.copy() for u, _, _ in active}
         for u, destination, _ in active:
             advance_dynamics(u, destination, dt)
         # The dynamics integrator can overshoot a planned point.  Apply a
@@ -174,6 +175,36 @@ class HeuristicController:
                                    "cause": "geofence"})
             if not changed:
                 break
+        # Validate the integrated state, not only the planned waypoint.  The
+        # dynamics model can move through an obstacle or below the terrain
+        # between planning ticks, especially while climbing over a tower.
+        for u in moved:
+            previous = previous_positions[u.uid]
+            if self.obstacles is not None:
+                hit = self.obstacles.blocking(previous, u.position)
+                containing = self.obstacles.containing(u.position)
+                if hit is not None or containing is not None:
+                    obstacle = containing or hit
+                    u.position = previous
+                    u.velocity[:] = 0.0
+                    events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid,
+                                   "related_id": u.task_id,
+                                   "details": {"obstacle_id": obstacle.obstacle_id,
+                                                "phase": "post_dynamics",
+                                                "action": "rollback_before_obstacle"},
+                                   "cause": "obstacle"})
+            if self.terrain is not None:
+                terrain_height = self.terrain.height_at(u.position[0], u.position[1])
+                minimum_z = terrain_height + 14.0
+                if u.position[2] < minimum_z:
+                    u.position[2] = minimum_z
+                    u.velocity[2] = max(0.0, u.velocity[2])
+                    events.append({"event_type": "SAFETY_OVERRIDE", "actor_id": u.uid,
+                                   "related_id": u.task_id,
+                                   "details": {"terrain_height_m": round(float(terrain_height), 3),
+                                                "clearance_m": 14.0,
+                                                "phase": "post_dynamics"},
+                                   "cause": "terrain"})
         return events
 
     def _score(self, u: UAV, p: PoI, gcs: GCS, graph: ConnectivityGraph) -> float:
