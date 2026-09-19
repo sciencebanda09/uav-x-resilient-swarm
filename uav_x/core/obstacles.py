@@ -48,6 +48,14 @@ class ObstacleField:
         return not any(np.all(p >= o.lo - self.clearance_m) and np.all(p <= o.hi + self.clearance_m)
                        for o in self.obstacles)
 
+    def containing(self, point: np.ndarray) -> Obstacle | None:
+        """Return an obstacle whose safety volume contains ``point``."""
+        p = np.asarray(point, dtype=float)
+        for obstacle in self.obstacles:
+            if np.all(p >= obstacle.lo - self.clearance_m) and np.all(p <= obstacle.hi + self.clearance_m):
+                return obstacle
+        return None
+
     def blocking(self, start: np.ndarray, end: np.ndarray) -> Obstacle | None:
         """Return the first AABB intersected by a segment, if any."""
         a, b = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
@@ -74,5 +82,16 @@ class ObstacleField:
         obstacle = self.blocking(start, destination)
         if obstacle is None: return None
         waypoint = np.asarray(destination, dtype=float).copy()
-        waypoint[2] = max(waypoint[2], obstacle.hi[2] + self.clearance_m)
+        safe_altitude = obstacle.hi[2] + self.clearance_m + 2.0
+        # Climb vertically before crossing the obstacle footprint.  Raising
+        # only the final destination still creates a diagonal segment through
+        # a tower while the vehicle is climbing.
+        expanded_xy = np.r_[obstacle.lo[:2] - self.clearance_m, obstacle.hi[:2] + self.clearance_m]
+        over_footprint = (expanded_xy[0] <= start[0] <= expanded_xy[2] and
+                          expanded_xy[1] <= start[1] <= expanded_xy[3])
+        if start[2] < safe_altitude and (over_footprint or self.blocking(start, destination) is obstacle):
+            waypoint = np.asarray(start, dtype=float).copy()
+            waypoint[2] = safe_altitude
+        else:
+            waypoint[2] = max(waypoint[2], safe_altitude)
         return waypoint, obstacle
