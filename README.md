@@ -205,3 +205,77 @@ are the authoritative reproducibility path; MATLAB support is optional.
 
 The separate Stage 1 technical proposal and demonstration video are submission
 artifacts and are not generated automatically by this repository.
+
+## MATLAB 3D mission scene
+
+The repository also includes a MATLAB-native 3D replay with lightweight
+hexacopters, terrain, obstacles, GCS, survey assignments, relay links, camera
+footprints, and mission coverage. It reads the same canonical JSONL log used by
+the Python and WebGL viewers:
+
+```matlab
+cd('C:\Users\kumar\OneDrive\Desktop\UAV_X');
+addpath('matlab');
+
+uav_x_3d_replay('runs\submission_demo.jsonl', ...
+    'artifacts\matlab_uavx_3d.gif');
+
+uav_x_3d_replay('runs\submission_demo.jsonl', ...
+    'artifacts\matlab_uavx_3d.mp4');
+
+uav_x_overview('runs\submission_demo.jsonl', ...
+    'artifacts\matlab_uavx_overview.png');
+```
+
+This is a MATLAB-native visualization/replay scene. Actual Gazebo co-simulation
+requires an external Gazebo/ROS installation and Robotics System Toolbox; it is
+not embedded inside MATLAB.
+
+## Generated submission artifacts
+
+The current generated figures and replays are stored in [`artifacts/`](artifacts/).
+They are produced from the canonical simulation log and are suitable for
+inspection, presentation, and submission video preparation.
+
+### Python 2D operations view
+
+![UAV-X 2D operations view](artifacts/operations_2d.png)
+
+### Python 3D replay
+
+![UAV-X Python 3D replay](artifacts/uav_x_replay_3d.gif)
+
+### MATLAB mission overview
+
+![UAV-X MATLAB 3D overview](artifacts/matlab_uavx_overview.png)
+
+### MATLAB 3D replay
+
+![UAV-X MATLAB 3D replay](artifacts/matlab_uavx_3d.gif)
+
+### MATLAB metrics
+
+![UAV-X MATLAB metrics](artifacts/matlab_metrics.png)
+
+### MATLAB 2D operations
+
+![UAV-X MATLAB 2D operations](artifacts/matlab_operations_2d.png)
+
+The MATLAB replay is also available as an MP4 file:
+[`artifacts/matlab_uavx_3d.mp4`](artifacts/matlab_uavx_3d.mp4).
+
+To regenerate the Python artifacts:
+
+```powershell
+py -3.11 -m uav_x.visualization.operations_2d `
+    runs\submission_demo.jsonl `
+    --out artifacts\operations_2d.png
+
+py -3.11 -m uav_x.visualization.replay_3d `
+    runs\submission_demo.jsonl `
+    --out artifacts\uav_x_replay_3d.gif `
+    --interval 100
+```
+
+To regenerate the MATLAB artifacts, run the commands in the
+[MATLAB 3D mission scene](#matlab-3d-mission-scene) section.
