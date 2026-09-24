@@ -94,11 +94,9 @@ The `CoverageGrid` records the larger ground area mapped by the camera.
 
 ```powershell
 python -m pip install -r requirements.txt
-python -m uav_x.simulation.runner --seed 7 --duration 120 --out runs\uav_x_run.jsonl
+python -m uav_x.simulation.runner --seed 7 --duration 2700 --out runs\uav_x_run.jsonl
 python -m uav_x.visualization.operations_2d runs\uav_x_run.jsonl
-python -m uav_x.visualization.replay_2d runs\uav_x_run.jsonl
-python -m uav_x.visualization.replay_3d runs\uav_x_run.jsonl
-python -m uav_x.validation --out reports\validation.json
+python -m uav_x.validation --duration 2700 --out reports\validation.json
 ```
 
 Run tests:
@@ -125,16 +123,35 @@ Challenge-facing scenarios are in `scenarios/`:
 Run the complete benchmark suite:
 
 ```powershell
-python -m uav_x.benchmarks --all --duration 120 --out reports\stage1_benchmark.json
+python -m uav_x.benchmarks --all --duration 2700 --out reports\stage1_benchmark.json
 ```
 
+### Enhanced low-latency relay-backbone profile
+
+The official baseline preserves the challenge figure's six-UAV, 100 m-radio
+assumptions and therefore exposes ferry latency for far PoIs. For an engineered
+low-latency deployment, run the separate relay-backbone profile:
+
+```powershell
+py -3.11 -m uav_x.simulation.runner `
+  --scenario scenarios\relay_backbone.yaml `
+  --policy heuristic `
+  --out runs\relay_backbone.jsonl
+```
+
+This profile uses 15 UAVs: six survey vehicles and nine station-keeping relay
+vehicles arranged as a 3×3 lattice. It uses a 400 m radio profile and powered
+relay pads, so the assumptions differ from the official 100 m baseline. The
+full 2700-second run completes all 10 PoIs with zero report-deadline violations,
+zero collisions, and all 15 vehicles landed on their designated pads.
+
 The report includes mission completion, connectivity availability, packet
-delivery, latency, recovery, collision, battery, geofence, and obstacle metrics.
+delivery, report latency, landing roll-call, recovery, collision, battery, geofence, and obstacle metrics.
 
 For long or streamed runs:
 
 ```powershell
-py -3.11 -m uav_x.simulation.runner --duration 120 --stream --out runs\streamed.jsonl
+py -3.11 -m uav_x.simulation.runner --duration 2700 --stream --out runs\streamed.jsonl
 ```
 
 ## WebGL replay viewer
@@ -232,51 +249,80 @@ This is a MATLAB-native visualization/replay scene. Actual Gazebo co-simulation
 requires an external Gazebo/ROS installation and Robotics System Toolbox; it is
 not embedded inside MATLAB.
 
+## One-command Stage 1 evidence package
+
+Run the complete evidence pipeline from the repository root:
+
+```powershell
+python tools\run_stage1.py
+```
+
+This runs the full test suite, the 2700-second (45-minute) benchmark and validation reports,
+randomized hidden-disturbance evaluation, controlled ablations, a combined
+failure/outage canonical log, browser replay export, and the judge-facing
+failure/recovery video. When MATLAB is available, the pipeline uses the
+MATLAB-native `VideoWriter` renderer; otherwise it uses the portable fallback
+GIF. Outputs are written to `reports/`, `runs/`, `artifacts/`,
+and `logs/`; the package index is
+`reports/stage1_package_summary.json`. On memory-constrained machines, cap
+numerical threading first:
+
+```powershell
+$env:OPENBLAS_NUM_THREADS='1'; $env:OMP_NUM_THREADS='1'; $env:MPLBACKEND='Agg'
+python tools\run_stage1.py
+```
+
+To invoke the MATLAB renderer directly from Python:
+
+```powershell
+python tools\run_matlab_video.py runs\stage1_failure_recovery.jsonl `
+    --out artifacts\stage1_failure_recovery_matlab.mp4
+```
+
+The bridge first uses the official MATLAB Engine API for Python when it is
+installed, then falls back to `matlab.exe -batch`. Install the Engine API from
+the MATLAB installation (`extern\engines\python`) if you want Python to keep
+the MATLAB session in-process. MATLAB still owns the scene and `VideoWriter`;
+Python only supplies the canonical log and output path.
+
 ## Generated submission artifacts
 
 The current generated figures and replays are stored in [`artifacts/`](artifacts/).
-They are produced from the canonical simulation log and are suitable for
-inspection, presentation, and submission video preparation.
+They are produced from the 2700-second mission-scale canonical logs
+(`runs/baseline2700.jsonl`, `runs/stage1_failure_recovery.jsonl`).
 
-### Python 2D operations view
+### Baseline operations view (1000 m arena, GCS at operational center)
 
-![UAV-X 2D operations view](artifacts/operations_2d.png)
+![UAV-X baseline operations view](artifacts/operations_2d.png)
 
-### Python 3D replay
+### Failure/recovery operations view
 
-![UAV-X Python 3D replay](artifacts/uav_x_replay_3d.gif)
+![UAV-X failure/recovery operations view](artifacts/failure_recovery_operations.png)
 
-### MATLAB mission overview
+### Failure/recovery replay
 
-![UAV-X MATLAB 3D overview](artifacts/matlab_uavx_overview.png)
+[`artifacts/stage1_failure_recovery.gif`](artifacts/stage1_failure_recovery.gif)
+(90 frames, stride 30 over the 2700 s log).
 
-### MATLAB 3D replay
+### Full demonstration video
 
-![UAV-X MATLAB 3D replay](artifacts/matlab_uavx_3d.gif)
-
-### MATLAB metrics
-
-![UAV-X MATLAB metrics](artifacts/matlab_metrics.png)
-
-### MATLAB 2D operations
-
-![UAV-X MATLAB 2D operations](artifacts/matlab_operations_2d.png)
-
-The MATLAB replay is also available as an MP4 file:
-[`artifacts/matlab_uavx_3d.mp4`](artifacts/matlab_uavx_3d.mp4).
+[`artifacts/stage1_full_demo.mp4`](artifacts/stage1_full_demo.mp4)
+(~16 s, 1280×720: operations stills + failure/recovery reel).
 
 To regenerate the Python artifacts:
 
 ```powershell
 py -3.11 -m uav_x.visualization.operations_2d `
-    runs\submission_demo.jsonl `
+    runs\baseline2700.jsonl `
     --out artifacts\operations_2d.png
 
-py -3.11 -m uav_x.visualization.replay_3d `
-    runs\submission_demo.jsonl `
-    --out artifacts\uav_x_replay_3d.gif `
-    --interval 100
+py -3.11 tools\build_stage1_video.py `
+    runs\stage1_failure_recovery.jsonl `
+    --out artifacts\stage1_failure_recovery.gif `
+    --stride 30 --fps 12
 ```
 
-To regenerate the MATLAB artifacts, run the commands in the
-[MATLAB 3D mission scene](#matlab-3d-mission-scene) section.
+MATLAB scripts in `matlab/` consume the same frozen logs; MATLAB figures are
+regenerated on demand via the commands in the
+[MATLAB 3D mission scene](#matlab-3d-mission-scene) section and are not
+checked in as stale exports.
