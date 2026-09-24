@@ -1,0 +1,19 @@
+# Enhanced low-latency profile.  This is a separate engineering profile,
+# not the official 100 m / six-UAV baseline: nine station-keeping relays form
+# a 3x3 lattice and six survey UAVs report over the live mesh.
+seed: 7
+duration_s: 2700
+dt: 1.0
+arena_m: 1000
+radio_range_m: 400
+min_separation_m: 20
+reserve_pct: 30
+packet_loss: 0.02
+fleet_size: 15
+relay_backbone_enabled: true
+backbone_relay_count: 9
+recall_margin_s: 300
+failure_time_s: 800
+outage_start_s: 850
+outage_duration_s: 120
+emergency_time_s: 1200
