@@ -1,9 +1,10 @@
 seed: 17
-duration_s: 120
+duration_s: 2700
 dt: 1.0
-outage_start_s: 35
-outage_duration_s: 15
-radio_range_m: 220
-min_separation_m: 18
-reserve_pct: 22
+arena_m: 1000
+outage_start_s: 900
+outage_duration_s: 120
+radio_range_m: 100
+min_separation_m: 20
+reserve_pct: 30
 packet_loss: 0.08
