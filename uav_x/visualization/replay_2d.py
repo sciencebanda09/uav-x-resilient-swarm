@@ -25,19 +25,24 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
     if obstacle_path.exists():
         import json
         obstacles = json.loads(obstacle_path.read_text(encoding="utf-8")).get("obstacles", [])
+    manifest = next((r for r in records if r["record_type"] == "manifest"), {})
+    arena = float(manifest.get("arena_m", 1000.0))
+    gcs_xy = (manifest.get("gcs_position_m") or [-75.0, 500.0])[:2]
+    margin = float((manifest.get("config") or {}).get("geofence_margin_m", 2.0))
+    min_x = float((manifest.get("config") or {}).get("geofence_min_x_m", -100.0))
 
     def draw(index: int):
         tick = ticks[index]; ax.clear(); status.clear(); chart.clear(); timeline.clear()
-        ax.set_facecolor("#101722"); ax.set_xlim(0, 500); ax.set_ylim(0, 500); ax.set_aspect("equal"); ax.grid(color="#273449", alpha=.65)
+        ax.set_facecolor("#101722"); ax.set_xlim(min_x, arena); ax.set_ylim(0, arena); ax.set_aspect("equal"); ax.grid(color="#273449", alpha=.65)
         ax.set_title(f"UAV-X OPERATIONS REPLAY   t = {tick['time_s']:.1f}s", color="#ffffff", loc="left", fontweight="bold")
         ax.set_xlabel("East (m)", color="#aab4c3"); ax.set_ylabel("North (m)", color="#aab4c3")
-        ax.add_patch(plt.Rectangle((2, 2), 496, 496, fill=False, edgecolor="#ffce56", linewidth=1.5, linestyle="--"))
+        ax.add_patch(plt.Rectangle((min_x, margin), arena - min_x - margin, arena - 2 * margin, fill=False, edgecolor="#ffce56", linewidth=1.5, linestyle="--"))
         for obstacle in obstacles:
             cx, cy, _ = obstacle["center_m"]; sx, sy, _ = obstacle["size_m"]
             color = "#d97745" if obstacle.get("kind") == "building" else "#4f8fc9" if obstacle.get("kind") == "tower" else "#8b7355"
             ax.add_patch(Rectangle((cx - sx / 2, cy - sy / 2), sx, sy, facecolor=color, edgecolor="#f4f4f4", alpha=.28, linewidth=1.0, zorder=1))
-        ax.scatter(40, 40, marker="s", s=150, c="#45aaf2", edgecolors="white", zorder=6)
-        ax.annotate("GCS\ncommand + data sink", (40, 40), xytext=(8, 8), textcoords="offset points", color="#45aaf2", fontsize=7, bbox=dict(facecolor="#101722", alpha=.8, edgecolor="#45aaf2", pad=2))
+        ax.scatter(*gcs_xy, marker="s", s=150, c="#45aaf2", edgecolors="white", zorder=6)
+        ax.annotate("GCS\ncommand + data sink", tuple(gcs_xy), xytext=(8, 8), textcoords="offset points", color="#45aaf2", fontsize=7, bbox=dict(facecolor="#101722", alpha=.8, edgecolor="#45aaf2", pad=2))
         for link in tick.get("links", []):
             if not link["available"]: continue
             a = next((u for u in tick["uavs"] if u["id"] == link["source_id"]), None); b = next((u for u in tick["uavs"] if u["id"] == link["target_id"]), None)
