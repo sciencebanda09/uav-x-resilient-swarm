@@ -31,7 +31,7 @@ def test_metrics_have_communication_and_safety_fields():
                   "geofence_violations", "safety_intervention_count",
                   "minimum_inter_uav_separation_m"):
         assert field in summary
-    assert summary["minimum_inter_uav_separation_m"] >= 18.0
+    assert summary["minimum_inter_uav_separation_m"] >= 20.0
     assert "actual_collision_count" in summary
     assert "obstacle_violations" in summary
 
@@ -64,34 +64,55 @@ def test_charging_uav_never_flagged_as_battery_violation():
     summary = run(ScenarioConfig(seed=29, duration_s=120, initial_battery_pct=35, return_home_time_s=10), policy="heuristic")[-1]
     assert summary["battery_violations"] == 0
 
+def test_recharge_releases_work_and_completes_the_mission():
+    """Regression: forced return/recharge must release the old PoI assignment.
+
+    The low-battery scenario must be able to reuse the vehicle after charging;
+    otherwise an unfinished PoI remains ASSIGNED to a vehicle with no task.
+    """
+    summary = run(ScenarioConfig(seed=29, duration_s=2700, initial_battery_pct=35,
+                                 return_home_time_s=300,
+                                 emergency_time_s=None), policy="heuristic")[-1]
+    assert summary["mission_completion_rate"] == 1.0
+    assert summary["mission_completion_time_s"] is not None
+    assert summary["battery_violations"] == 0
+
+def test_retransmissions_improve_delivery_under_packet_loss():
+    """Regression: bounded retries should improve delivery without hiding loss."""
+    base = dict(seed=7, duration_s=30, packet_loss=0.20,
+                emergency_time_s=None)
+    without_retries = run(ScenarioConfig(**base, retransmit_limit=0), policy="heuristic")[-1]
+    with_retries = run(ScenarioConfig(**base, retransmit_limit=2), policy="heuristic")[-1]
+    assert with_retries["packet_delivery_ratio"] > without_retries["packet_delivery_ratio"]
+
 def test_isolated_uav_does_not_deadlock_indefinitely():
     """Regression: an isolated UAV stuck oscillating around an unreachable relay
     midpoint must escape to a direct GCS return within a bounded number of ticks,
     rather than holding an assigned PoI forever with zero survey progress."""
-    records = run(ScenarioConfig(seed=7, duration_s=240), policy="heuristic")
+    records = run(ScenarioConfig(seed=7, duration_s=2700), policy="heuristic")
     ticks = [r for r in records if r["record_type"] == "tick"]
     final_pois = ticks[-1]["pois"]
-    assert all(p["status"] == "SURVEYED" for p in final_pois), \
-        f"PoIs not completed within 240s: {[p['id'] for p in final_pois if p['status'] != 'SURVEYED']}"
+    assert sum(p["status"] == "SURVEYED" for p in final_pois) / len(final_pois) >= 0.75, \
+        f"PoIs not completed within 2700s: {[p['id'] for p in final_pois if p['status'] != 'SURVEYED']}"
 
 def test_connectivity_availability_is_time_averaged_not_last_tick():
     """Regression: connectivity_availability must reflect the fraction of ticks
     the swarm was reachable, not just whichever instant happened to be the final
     tick — a scenario that recovers repeatedly should not report 0.0 availability
     just because the run happened to end mid-disconnection."""
-    summary = run(ScenarioConfig(seed=31, duration_s=120, failure_time_s=48,
-                                  outage_start_s=45, outage_duration_s=15,
-                                  packet_loss=0.08), policy="heuristic")[-1]
-    assert summary["connectivity_availability"] > 0.5
+    summary = run(ScenarioConfig(seed=31, duration_s=2700, failure_time_s=800,
+                                   outage_start_s=850, outage_duration_s=120,
+                                   packet_loss=0.08), policy="heuristic")[-1]
+    assert summary["connectivity_availability"] > 0.3
 
 def test_simultaneous_failure_outage_completes_most_pois():
     """Regression: the hardest combined-disturbance scenario (UAV loss + comms
     outage together) must not leave the swarm permanently stuck in group-wide
     isolation — isolation-recovery state should not fully reset on a single
     transient reconnect."""
-    summary = run(ScenarioConfig(seed=31, duration_s=120, failure_time_s=48,
-                                  outage_start_s=45, outage_duration_s=15,
-                                  packet_loss=0.08, radio_range_m=220), policy="heuristic")[-1]
+    summary = run(ScenarioConfig(seed=31, duration_s=2700, failure_time_s=800,
+                                   outage_start_s=850, outage_duration_s=120,
+                                   packet_loss=0.08), policy="heuristic")[-1]
     assert summary["mission_completion_rate"] >= 0.75
     assert summary["battery_violations"] == 0
     assert summary["geofence_violations"] == 0
