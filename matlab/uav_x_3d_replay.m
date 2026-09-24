@@ -5,6 +5,14 @@ records = load_log(logPath);
 ticks = records(cellfun(@(r) strcmp(r.record_type, 'tick'), records));
 if isempty(ticks), error('UAV-X log contains no tick records.'); end
 root = fileparts(fileparts(mfilename('fullpath')));
+% Headless batch rendering must not depend on the browser/WebGL figure
+% backend.  The software OpenGL/painters combination is also reproducible
+% across MATLAB desktop and CI environments.
+try
+    opengl('software');
+catch
+end
+set(groot,'defaultFigureRenderer','opengl');
 terrain = jsondecode(fileread(fullfile(root, 'viewer', 'public', 'scene', 'terrain_heightmap.json')));
 stride = max(1, floor(double(terrain.grid) / 45));
 terrainZ = double(terrain.elevation_m(1:stride:end, 1:stride:end));
@@ -112,7 +120,14 @@ function w=open_writer(path), w.kind='none'; w.path=path; w.obj=[]; w.frameSize=
 function w=append_frame(w,fig,k)
 if ~isgraphics(fig,'figure'), return; end
 drawnow;
-frame=getframe(fig);
+% getframe relies on the interactive graphics/WebGL capture backend in newer
+% MATLAB releases and can fail in -batch mode.  PRINT uses the stable raster
+% export path and works for both desktop and headless rendering.
+pngPath=[tempname '.png'];
+print(fig,pngPath,'-dpng','-r100');
+frame.cdata=imread(pngPath);
+frame.colormap=[];
+if isfile(pngPath), delete(pngPath); end
 if isempty(w.frameSize)
     sourceSize=size(frame.cdata);
     w.frameSize=[max(2,2*floor(sourceSize(1)/2)), max(2,2*floor(sourceSize(2)/2))];
