@@ -19,10 +19,11 @@ class Link:
 class ConnectivityGraph:
     def __init__(self, gcs: GCS, range_m: float, base_loss: float, rng: np.random.Generator,
                  terrain=None, bandwidth_kbps: float = 1800.0, queue_kb: float = 256.0,
-                 retransmit_limit: int = 0):
+                 retransmit_limit: int = 0, reliability_aware_routing: bool = True):
         self.gcs, self.range_m, self.base_loss, self.rng, self.terrain = gcs, range_m, base_loss, rng, terrain
         self.bandwidth_kbps, self.queue_kb = float(bandwidth_kbps), float(queue_kb)
         self.retransmit_limit = max(0, int(retransmit_limit))
+        self.reliability_aware_routing = bool(reliability_aware_routing)
         self.links: list[Link] = []
         self.routes: dict[str, list[str]] = {}
         self.tx_attempts = 0
@@ -49,10 +50,17 @@ class ConnectivityGraph:
         link = Link(a_id, b_id, available, 20.0 + d * 0.25, loss,
                     max(64.0, self.bandwidth_kbps - d * 4.0), los)
         self.links.append(link)
-        reverse = Link(b_id, a_id, available, link.latency_ms, loss, link.bandwidth_kbps, available)
+        reverse = Link(b_id, a_id, available, link.latency_ms, loss, link.bandwidth_kbps, los)
         self.links.append(reverse)
         if available:
-            adjacency[a_id].append((b_id, d)); adjacency[b_id].append((a_id, d))
+            # Prefer routes with fewer hops, but use expected link reliability
+            # and distance to break ties.  The old implementation treated all
+            # links as unit-cost edges, so a long/high-loss route could win
+            # over a slightly longer but much healthier route.
+            expected_loss = -math.log(max(1e-6, 1.0 - loss))
+            edge_cost = (1.0 + 0.25 * d / max(self.range_m, 1.0) + 2.0 * expected_loss
+                         if self.reliability_aware_routing else 1.0)
+            adjacency[a_id].append((b_id, edge_cost)); adjacency[b_id].append((a_id, edge_cost))
 
     @staticmethod
     def _shortest_routes(adjacency: dict[str, list[tuple[str, float]]]) -> dict[str, list[str]]:
@@ -63,8 +71,7 @@ class ConnectivityGraph:
         while queue:
             distance, current = heapq.heappop(queue)
             if distance > distances.get(current, float("inf")): continue
-            for neighbor, _ in adjacency.get(current, []):
-                edge_cost = 1.0
+            for neighbor, edge_cost in adjacency.get(current, []):
                 candidate = distance + edge_cost
                 if candidate < distances.get(neighbor, float("inf")):
                     distances[neighbor] = candidate
@@ -103,8 +110,8 @@ class ConnectivityGraph:
             if uav.failed:
                 continue
             self.tx_attempts += 1
-            delivered = len(route) >= 2; latency = 0.0; failed_hop = None; attempts = 0
-            while attempts <= self.retransmit_limit and not delivered or attempts == 0:
+            delivered = False; latency = 0.0; failed_hop = None; attempts = 0
+            for _ in range(1 + self.retransmit_limit):
                 attempts += 1
                 delivered = len(route) >= 2; latency = 0.0; failed_hop = None
                 for i in range(len(route) - 1):
@@ -114,7 +121,8 @@ class ConnectivityGraph:
                         delivered = False
                         if failed_hop is None:
                             failed_hop = i
-                if delivered or len(route) < 2: break
+                if delivered or len(route) < 2:
+                    break
             if delivered:
                 self.tx_delivered += 1
                 self.latency_samples_ms.append(latency)
