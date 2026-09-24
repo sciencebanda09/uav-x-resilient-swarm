@@ -25,18 +25,17 @@ def _stats(rows: list[dict], field: str) -> dict:
             "stdev": pstdev(values) if len(values) > 1 else 0.0}
 
 
-def run_suite(seeds: list[int] | None = None, duration: float = 120.0) -> dict:
+def run_suite(seeds: list[int] | None = None, duration: float = 2700.0) -> dict:
     """Run the six challenge-facing scenarios over repeatable seeds."""
     seeds = [7, 17, 27] if seeds is None else seeds
     scenario_values = {
-        "baseline": {},
-        "outage_recovery": {"outage_start_s": 35, "outage_duration_s": 15},
-        "uav_failure": {"failure_time_s": 48},
-        "emergency_priority": {"emergency_time_s": 65},
-        "return_home_recharge": {"initial_battery_pct": 35, "return_home_time_s": 10},
-        "simultaneous_failure_outage": {"failure_time_s": 48, "outage_start_s": 45,
-                                         "outage_duration_s": 15, "packet_loss": 0.08,
-                                         "radio_range_m": 220},
+        "baseline": {"emergency_time_s": None},
+        "outage_recovery": {"outage_start_s": 900, "outage_duration_s": 120, "emergency_time_s": None},
+        "uav_failure": {"failure_time_s": 800, "emergency_time_s": None},
+        "emergency_priority": {"emergency_time_s": 1200},
+        "return_home_recharge": {"initial_battery_pct": 35, "return_home_time_s": 300, "emergency_time_s": None},
+        "simultaneous_failure_outage": {"failure_time_s": 800, "outage_start_s": 850,
+                                         "outage_duration_s": 120, "packet_loss": 0.08},
     }
     scenarios = {}
     for name, overrides in scenario_values.items():
@@ -59,7 +58,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--seeds", type=int, nargs="+")
-    p.add_argument("--duration", type=float, default=120.0)
+    p.add_argument("--duration", type=float, default=2700.0)
     p.add_argument("--out", default="reports/policy_comparison.json")
     p.add_argument("--all", action="store_true", help="run the complete Stage 1 scenario suite")
     a = p.parse_args()
