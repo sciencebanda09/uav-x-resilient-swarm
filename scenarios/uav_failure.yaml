@@ -1,8 +1,9 @@
 seed: 23
-duration_s: 120
+duration_s: 2700
 dt: 1.0
-failure_time_s: 48
-radio_range_m: 220
-min_separation_m: 18
-reserve_pct: 22
+arena_m: 1000
+failure_time_s: 800
+radio_range_m: 100
+min_separation_m: 20
+reserve_pct: 30
 packet_loss: 0.05
