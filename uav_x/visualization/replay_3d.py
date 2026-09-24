@@ -9,14 +9,18 @@ import numpy as np
 from ..interfaces.log_schema import read_jsonl
 
 def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None:
-    ticks = [r for r in read_jsonl(path) if r["record_type"] == "tick"]
+    records = read_jsonl(path)
+    ticks = [r for r in records if r["record_type"] == "tick"]
     if not ticks: raise ValueError("log has no tick records")
+    manifest = next((r for r in records if r["record_type"] == "manifest"), {})
+    arena = float(manifest.get("arena_m", 1000.0))
+    gcs_xy = (manifest.get("gcs_position_m") or [-75.0, 500.0])[:2]
     fig = plt.figure(figsize=(12, 8), facecolor="#08111c"); ax = fig.add_subplot(111, projection="3d")
     heightmap_path = Path(__file__).resolve().parents[2] / "viewer" / "public" / "scene" / "terrain_heightmap.json"
     if heightmap_path.exists():
-        terrain = json.loads(heightmap_path.read_text(encoding="utf-8")); source = np.asarray(terrain["elevation_m"], dtype=float); stride = max(1, source.shape[0] // 28); source = source[::stride, ::stride]; axis = np.linspace(0, 500, source.shape[0]); X, Y = np.meshgrid(axis, axis); Z = source
+        terrain = json.loads(heightmap_path.read_text(encoding="utf-8")); source = np.asarray(terrain["elevation_m"], dtype=float); stride = max(1, source.shape[0] // 28); source = source[::stride, ::stride]; axis = np.linspace(0, arena, source.shape[0]); X, Y = np.meshgrid(axis, axis); Z = source
     else:
-        axis = np.linspace(0, 500, 20); X, Y = np.meshgrid(axis, axis); Z = 4 + 7*np.sin(X/110) * np.cos(Y/130)
+        axis = np.linspace(0, arena, 20); X, Y = np.meshgrid(axis, axis); Z = 4 + 7*np.sin(X/110) * np.cos(Y/130)
     terrain_max = float(np.max(Z))
     obstacle_path = Path(__file__).resolve().parents[2] / "scene" / "obstacles.json"
     obstacles = json.loads(obstacle_path.read_text(encoding="utf-8")).get("obstacles", []) if obstacle_path.exists() else []
@@ -30,14 +34,14 @@ def replay(path: str, output: str | None = None, interval_ms: int = 100) -> None
         color = "#c06b42" if kind == "building" else "#4f8fc9" if kind == "tower" else "#8b7355"
         ax.add_collection3d(Poly3DCollection([vertices[face] for face in faces], facecolors=color, edgecolors="#f4f4f4", linewidths=.6, alpha=.78))
     def draw(index: int):
-        tick = ticks[index]; ax.clear(); ax.set_facecolor("#08111c"); ax.set_xlim(0, 500); ax.set_ylim(0, 500); ax.set_zlim(0, max(140, terrain_max + 65)); ax.view_init(elev=38, azim=35 + index*.4)
+        tick = ticks[index]; ax.clear(); ax.set_facecolor("#08111c"); ax.set_xlim(-100, arena); ax.set_ylim(0, arena); ax.set_zlim(0, max(140, terrain_max + 65)); ax.view_init(elev=38, azim=35 + index*.4)
         ax.set_xlabel("East"); ax.set_ylabel("North"); ax.set_zlabel("Altitude"); ax.set_title(f"UAV-X CINEMATIC REPLAY  |  t={tick['time_s']:.1f}s", color="white", pad=12)
         ax.plot_surface(X, Y, Z, cmap="gist_earth", alpha=.48, linewidth=0, antialiased=True,
                         shade=True, edgecolor=(.08, .12, .10, .12))
         for obstacle in obstacles:
             draw_box(obstacle)
-        gcs_index = int(np.clip(round(40 / 500 * (len(axis) - 1)), 0, len(axis) - 1))
-        ax.scatter(40, 40, float(Z[gcs_index, gcs_index]) + 20, c="#00c8ff", marker="s", s=90, edgecolors="black", linewidth=.8, depthshade=False)
+        gcs_index = int(np.clip(round((gcs_xy[0] + 100) / (arena + 100) * (len(axis) - 1)), 0, len(axis) - 1))
+        ax.scatter(*gcs_xy, float(Z[gcs_index, gcs_index]) + 20, c="#00c8ff", marker="s", s=90, edgecolors="black", linewidth=.8, depthshade=False)
         for link in tick.get("links", []):
             if not link["available"]: continue
             a = next((u for u in tick["uavs"] if u["id"] == link["source_id"]), None); b = next((u for u in tick["uavs"] if u["id"] == link["target_id"]), None)
