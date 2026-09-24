@@ -1,9 +1,10 @@
 seed: 29
-duration_s: 120
+duration_s: 2700
 dt: 1.0
+arena_m: 1000
 initial_battery_pct: 35
-return_home_time_s: 10
-radio_range_m: 220
-min_separation_m: 18
-reserve_pct: 22
+return_home_time_s: 300
+radio_range_m: 100
+min_separation_m: 20
+reserve_pct: 30
 packet_loss: 0.04
