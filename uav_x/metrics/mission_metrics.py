@@ -7,6 +7,9 @@ def summarize(records: list[dict]) -> dict:
     ticks = [r for r in records if r["record_type"] == "tick"]
     events = [r for r in records if r["record_type"] == "event"]
     if not ticks: return {}
+    manifest_cfg = (records[0].get("config") or {}) if records and records[0].get("record_type") == "manifest" else {}
+    min_sep = float(manifest_cfg.get("min_separation_m", 20.0))
+    deadline = float(manifest_cfg.get("report_deadline_s", 10.0))
     final = ticks[-1]
     pois = final.get("pois", [])
     surveyed = sum(p["status"] == "SURVEYED" for p in pois)
@@ -27,20 +30,31 @@ def summarize(records: list[dict]) -> dict:
             for b in active[a_i + 1:]:
                 distance = math.dist(a["position_m"], b["position_m"])
                 separations.append(distance)
-                if distance < 18.0:
+                if distance < min_sep:
                     actual_collisions += 1
     packets = [p for r in ticks for p in r.get("packets", [])]
+    routed = [p for p in packets if p.get("hop_count", 0) > 0]
     latencies = [p["latency_ms"] for p in packets if p.get("delivered")]
     safety_violations = [e for e in events if e.get("event_type") == "SAFETY_VIOLATION"]
     safety_overrides = [e for e in events if e.get("event_type") == "SAFETY_OVERRIDE"]
-    # Completion time is the first instant at which every PoI in the run is
-    # surveyed, not the last tick at which any PoI happened to be surveyed.
+    # Completion time is the first instant at which the FINAL surveyed set is
+    # complete — late spawns (random spawn, emergency injection) must not be
+    # excluded just because the original set finished earlier.
     completion_time = None
+    final_ids = {p["id"] for p in pois if p["status"] == "SURVEYED"}
+    if final_ids:
+        for r in ticks:
+            frame = {p["id"] for p in r.get("pois", []) if p["status"] == "SURVEYED"}
+            if final_ids.issubset(frame):
+                completion_time = r["time_s"]
+                break
+    # Emergency response: worst injection-to-survey delay for injected PoIs.
+    injected = {e.get("related_id"): e["time_s"] for e in events if e.get("event_type") == "EMERGENCY_POI"}
+    emergency_response = []
     for r in ticks:
-        frame_pois = r.get("pois", [])
-        if frame_pois and all(p["status"] == "SURVEYED" for p in frame_pois):
-            completion_time = r["time_s"]
-            break
+        for p in r.get("pois", []):
+            if p["id"] in injected and p["status"] == "SURVEYED" and p.get("surveyed_time_s") is not None:
+                emergency_response.append(p["surveyed_time_s"] - injected[p["id"]])
     outage_events = [e for e in events if e.get("event_type") in {"UAV_FAILURE", "LINK_OUTAGE"}]
     recovery_times = []
     for outage in outage_events:
@@ -51,12 +65,28 @@ def summarize(records: list[dict]) -> dict:
                       all(u["gcs_reachable"] for u in active)), None)
         if later is not None: recovery_times.append(later - outage["time_s"])
     redundancy = [v for r in ticks for v in r.get("route_redundancy", {}).values()]
+    # ponytail: figure bounds — report latency per PoI, landing roll-call.
+    report_latencies = []
+    for p in pois:
+        if p["status"] == "SURVEYED" and p.get("surveyed_time_s") is not None and p.get("reported_time_s") is not None:
+            report_latencies.append(p["reported_time_s"] - p["surveyed_time_s"])
+    unreported = sum(p["status"] == "SURVEYED" and p.get("reported_time_s") is None for p in pois)
+    final_uavs = final.get("uavs", [])
+    landed = sum(u["role"] == "LAND" for u in final_uavs if not u.get("failed"))
+    unlanded = sum(u["role"] != "LAND" for u in final_uavs if not u.get("failed"))
     return {"mission_completion_rate": surveyed / total,
             "priority_weighted_mission_score": sum((6-p["priority"]) for p in pois if p["status"] == "SURVEYED"),
             "mission_completion_time_s": completion_time,
+            "report_latency_s_mean": sum(report_latencies) / len(report_latencies) if report_latencies else None,
+            "report_latency_s_max": max(report_latencies) if report_latencies else None,
+            "report_deadline_violations": sum(v > deadline for v in report_latencies) + unreported,
+            "landed_count": landed,
+            "unlanded_count": unlanded,
             "connectivity_availability": connectivity_availability,
             "communication_downtime_ticks": sum(1 for r in ticks if not all(u["gcs_reachable"] for u in r.get("uavs", []) if not u.get("failed"))),
             "packet_delivery_ratio": sum(p.get("delivered", False) for p in packets) / max(1, len(packets)),
+            "connected_packet_delivery_ratio": sum(p.get("delivered", False) for p in routed) / max(1, len(routed)),
+            "emergency_response_s_max": max(emergency_response) if emergency_response else None,
             "mean_latency_ms": sum(latencies) / max(1, len(latencies)),
             "p95_latency_ms": sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)] if latencies else None,
             "relay_reallocations": sum(e.get("event_type") == "ROLE_CHANGE" and e.get("details", {}).get("to") in {"RELAY", "RECOVER"} for e in events),
